@@ -1,0 +1,457 @@
+---
+title: Is there a difference in BMI classification in young adults aged 24-32 who engage in high vs. low levels of sedentary behavior?
+author: "Albert Pool"
+purpose: Determine whether an association exists between BMI classification and sedentary behavior
+output:
+  html_document:
+    df_print: paged
+  word_document: default
+  pdf_document: default
+last edit: 12/12/202
+data: 'National Longitudinal Study of Adolescent to Adult Health (Add Health) Wave IV (2008-2009)'
+created: 10/15/2021
+---
+Outcome variable: BMI classification
+
+Predictors: Hours spent watching television or videos over the last 7 days, hours spent playing computer or videogames over the last 7 days
+
+## Description of data
+Add Health is a longitudinal, prospective cohort study begun in 1994. Having completed 5 waves, the most recent was conducted from 2016-2018. Wave IV, being used for this study, was conducted with 15,701 original Wave 1 participants from 2008-2009 with a participant age range from 24-32 years old. This survey included additional sections on educational transitions, economic status and financial resources and strains, sleep patterns and sleep quality, illnesses and medications, physical activities, memory, emotional content and quality of relationships, and maltreatment during childhood by caregivers.(1)
+```{r echo = FALSE}
+#Imported Add Health Wave IV data into R Markdown file and load library packages
+#Import the data and library packages
+pacman::p_load(survival, survminer, tidyverse, readr, lmtest, table1)
+library(package='haven')
+library(package='tidyverse')
+library(package='dplyr')
+library(package='purrr')
+library('magrittr')
+library(haven)
+w4inhome_dvn <- read_sav("w4inhome_dvn.sav")
+w4inhome_red <- w4inhome_dvn %>%
+  dplyr::select(H4DA1, H4DA23, H4BMICLS, H4GH8, H4WAIST, H4IR4, BIO_SEX4) %>%
+  mutate(H4DA1 = as.numeric(H4DA1)) %>%
+  mutate(H4DA1 = na_if(x = H4DA1, y = 996)) %>%
+  mutate(H4DA1 = na_if(x = H4DA1, y = 998)) %>%
+  mutate(H4DA1 = na_if(x = H4DA1, y = '.')) %>%
+#Converted H4DA23 to numeric and dropped participants who refused to answer
+  mutate(H4DA23 = as.numeric(H4DA23)) %>%
+  mutate(H4DA23 = na_if(x = H4DA23, y = 996)) %>%
+  mutate(H4DA23 = na_if(x = H4DA23, y = 997)) %>%
+  mutate(H4DA23 = na_if(x = H4DA23, y = 998)) %>%
+  mutate(H4DA23 = na_if(x = H4DA23, y = '.')) %>%
+#Converted H4BMICLS to factor, recoded and renamed the categories, and dropped participants who refused to answer
+  mutate(H4BMICLS = as.factor(H4BMICLS)) %>%
+  mutate(H4BMICLS = recode_factor(.x = H4BMICLS,
+                                   `1` = 'Underweight: <18.5kg/m^2',
+                                   `2` = 'Normal: 18.5-<25kg/m^2',
+                                   `3` = 'Overweight: 25-<30kg/m^2',
+                                   `4` = 'Obese: 30+kg/m^2',
+                                   `5` = 'Obese: 30+kg/m^2',
+                                   `6` = 'Obese: 30+kg/m^2')) %>%
+ mutate(H4BMICLS = na_if(x = H4BMICLS, y = 88)) %>%
+  mutate(H4BMICLS = na_if(x = H4BMICLS, y = 89)) %>%
+  mutate(H4BMICLS = na_if(x = H4BMICLS, y = 96)) %>%
+  mutate(H4BMICLS = na_if(x = H4BMICLS, y = 97)) %>%
+  mutate(H4BMICLS = na_if(x = H4BMICLS, y = 99)) %>%
+#Converted H4GH8 to numeric and dropped participants who refused to answer
+  mutate(H4GH8 = as.numeric(H4GH8)) %>%
+  mutate(H4GH8 = na_if(x = H4GH8, y = 996)) %>%
+  mutate(H4GH8 = na_if(x = H4GH8, y = 998)) %>%
+  mutate(H4GH8 = na_if(x = H4GH8, y = '.')) %>%
+#Converted H4WAIST to numeric and dropped participants who refused to answer
+  mutate (H4WAIST = as.numeric(H4WAIST)) %>%
+  mutate(H4WAIST =na_if (x = H4WAIST, y = 996)) %>%
+  mutate(H4WAIST =na_if (x = H4WAIST, y = 997)) %>%
+  mutate(H4WAIST =na_if (x = H4WAIST, y = 999)) %>%
+#Converted H4IR4 to factor, recoded and renamed the categories, and dropped participants who refused to answer
+  mutate(H4IR4 = as.factor(H4IR4)) %>%
+  mutate(H4IR4 =recode_factor(.x =H4IR4,
+                               `1` = 'White',
+                               `2` = 'Black or African American',
+                               `3` = 'American Indian or Alaska Native',
+                               `4` = 'Asian or Pacific Islander')) %>%
+  mutate(H4IR4 = na_if(x = H4IR4, y = '.')) %>%
+#Converted BIO_SEX4 to factor and recoded and renamed the categories
+  mutate (BIO_SEX4 = as.factor (BIO_SEX4)) %>%
+  mutate(BIO_SEX4 = recode_factor(.x = BIO_SEX4, 
+                                      `1` = 'Male',
+                                      `2` = 'Female')) %>%
+#Renamed all variables
+  rename(watch_tel_vid = H4DA1) %>%
+  rename(play_computergames = H4DA23) %>%
+  rename(BMI_class = H4BMICLS) %>%
+  rename(eat_fastfood = H4GH8)%>%
+  rename(waist_cir = H4WAIST) %>%
+  rename(race = H4IR4) %>%
+  rename(sex = BIO_SEX4) %>%
+  drop_na()
+```
+#Two descriptive Table 1s created for hours spent watching television and hours spent playing video games
+```{r echo = FALSE}
+w4inhome_red %<>%
+  mutate(watch_tel_vid2=case_when(
+    watch_tel_vid == 0 ~ "0",
+    watch_tel_vid == 1 ~ "1",
+    watch_tel_vid == 2 ~ "2",
+    watch_tel_vid == 3 ~ "3",
+    watch_tel_vid == 4 ~ "4",
+    watch_tel_vid >= 5~ "5+",
+  ))
+w4inhome_red %<>%
+  mutate(play_computergames2=case_when(
+    play_computergames == 0 ~ "0",
+    play_computergames == 1 ~ "1",
+    play_computergames == 2 ~ "2",
+    play_computergames == 3 ~ "3",
+    play_computergames == 4 ~ "4",
+    play_computergames >= 5~ "5+",
+  ))
+head(w4inhome_red)
+#Created Table 1 for the predictor "Hours spent watching television/videos over the past 7 days" 
+table1(~waist_cir + race + sex + eat_fastfood + BMI_class|watch_tel_vid2, overall="Total", rowlabelhead="Variable", footnote = 'SD = standard deviation', w4inhome_red)
+#Created another Table 1 for the predictor "Hours spent playing computer/video games over the past 7 days"
+table1(~waist_cir + race +sex + eat_fastfood + BMI_class|play_computergames2, overall="Total", footnote='SD = standard deviation', w4inhome_red)
+```
+#Boxplots depicting relationship between BMI classification and the two predictor variables
+```{r echo = FALSE}
+#Boxplot between BMI classification and hours spent watching television or videos over the last 7 days
+library(ggplot2)
+library(haven)
+w4inhome_red %>%
+  ggplot(aes(x=BMI_class, y= watch_tel_vid, group=BMI_class)) +    
+  geom_boxplot(aes(fill=watch_tel_vid)) +
+  ggtitle ("Boxplot of Hours Spent Watching TV or Videos by BMI classification") +
+  xlab ("BMI Classification") +
+  ylab ("Hours Spent Watching TV or Videos") +
+  scale_fill_manual (values = c("blue", "orange", "red", "yellow")) +
+  coord_flip () +
+  theme_minimal()
+```
+#Boxplot between BMI classification and hours spent playing computer or videogames over the last 7 days
+```{r echo = FALSE}
+w4inhome_red %>%
+  ggplot(aes(x=BMI_class, y= play_computergames, group=BMI_class)) +    
+  geom_boxplot(aes(fill=watch_tel_vid)) +
+  ggtitle ("Boxplot of Hours Spent Playing Video or Computer Games by BMI classification") +
+  xlab ("BMI Classification") +
+  ylab ("Hours Spent Playing Video or Computer Games") +
+  scale_fill_manual (values = c("blue", "orange", "red", "yellow")) +
+  coord_flip() +
+  theme_minimal()
+```
+From the boxplots above, it is clear that for each of the four BMI classifications the distribution of hours spent watching television/videos and hours spent playing computer/video games are left skewed. There appears to be very little differences in the medians between categories of BMI classification. Because the boxplots indicate that the continuous predictor variables are left skewed rather than normally distributed, Kruskal-Wallis tests will be performed in place of one-way ANOVAs to determine whether there are significant differences between the medians of each category of the outcome variable, BMI classification.
+#Kruskal-Wallis tests 
+```{r echo = FALSE}
+library('FSA')
+#Hours spent watching television and BMI classification
+kruskal.test(watch_tel_vid ~ BMI_class, data = w4inhome_red)
+#Dunn's Post-hoc
+dunnTest(watch_tel_vid~BMI_class, data=w4inhome_red)
+#Hours spent playing computer/video games and BMI classification
+kruskal.test(play_computergames ~ BMI_class, data = w4inhome_red)
+#Dunn's Post-hoc
+dunnTest(play_computergames~BMI_class, data=w4inhome_red)
+```
+Since p<0.05, there is sufficient evidence to support the alternative hypothesis that there are significant differences exist between the medians of one or all of the categories of the variable BMI classification. 
+#Assumptions of the Kruskal-Wallis test
+1. Independent treatment groups
+The original Wave 1 survey took place in 145 middle school, junior high schools, and high schools,   after which a random sample of the students surveyed were selected and interviewed at home. This ensured randomization of participants as well as independence of observations.
+
+2. Categorical and continuous variables
+The outcome variable of the study, BMI classification, is categorical with a total of 4 categories. The two predictor variables, hours spent watching television/videos and hours spent playing computer/video games over the past 7 days, were both continuous. 
+
+3. Random sampling
+A random sampling of students in 145 middle, junior, and high schools was selected after a school surveys to be interviewed at home and enrolled in the Add Health study. 
+#Multinomial logistic regression models with and without covariates included, as well as models with interaction term between sex and each exposure
+1. Exposure 1 model
+1. Exposure 1 + covariates
+3. Exposure 2
+4. Exposure 2 + covariates
+5. Exposure 1 + covariate +sex*exposure1
+6. Exposure 2 + covariate +sex*exposure2
+```{r echo = FALSE}
+#1 Multinomial logistic regression (without covariates)
+library('nnet')
+w4inhome_red$BMI_class2 <- relevel(w4inhome_red$BMI_class, ref = "Obese: 30+kg/m^2")
+w4inhome_red_mod <- multinom (formula = BMI_class2 ~ watch_tel_vid,
+                          data = w4inhome_red,
+                                         model = TRUE)
+summary (w4inhome_red_mod)
+#Predictor significance using ORs and CIs
+#underweight
+oddsrat_underweight <- t (x= exp (x = coef(object = w4inhome_red_mod)))[ ,1]
+confint_underweight <- exp (x = confint (object = w4inhome_red_mod))[ , 1:2, 1]
+underweight <- data.frame (OR_underweight = oddsrat_underweight,
+                           CI_underweight = confint_underweight)
+underweight
+
+oddsrat_underweight <- t (x= exp (x = coef(object = w4inhome_red_mod)))[ ,1]
+confint_underweight <- exp (x = confint (object = w4inhome_red_mod))[ , 1:2, 1]
+underweight <- data.frame (OR_underweight = oddsrat_underweight,
+                           CI_underweight = confint_underweight)
+underweight
+#normal weight
+oddsrat_normalweight <- t (x= exp (x = coef(object = w4inhome_red_mod)))[ ,2]
+confint_normalweight <- exp (x = confint (object = w4inhome_red_mod))[ , 1:2, 2]
+normalweight <- data.frame (OR_normalweight = oddsrat_normalweight,
+                           CI_normalweight = confint_normalweight)
+normalweight
+#overweight
+oddsrat_overweight <- t (x= exp (x = coef(object = w4inhome_red_mod)))[ ,3]
+confint_overweight <- exp (x = confint (object = w4inhome_red_mod))[ , 1:2, 3]
+overweight <- data.frame (OR_overweight = oddsrat_overweight,
+                           CI_overweight = confint_overweight)
+overweight
+OR_CI_BMI <- data.frame (underweight, normalweight, overweight)
+OR_CI_BMI
+```
+After conducting the multinomial logistic regression with just the outcome and predictor, normal weight (OR:0.98, 95%CI:0.98-0.99) and overweight (OR:0.99, 95%CI:0.99-1.00) were the only two categories of BMI that were statistically significantly associated with watching television or videos.
+
+Therefore, for every 1-hour increase in watching television or videos per week, participants who were normal weight had 0.02 times lower odds of becoming obese compared to the other categories of BMI. Likewise, for every 1-hour increase in watching television or videos, those who were overweight had 0.01 times lower odds of becoming obese compared to other BMI categories. 
+```{r echo = FALSE}
+#2 Multinomial logistic regression (with covariates)
+w4inhome_red$BMI_class2 <- relevel(w4inhome_red$BMI_class, ref = "Obese: 30+kg/m^2")
+w4inhome_red_mod <- multinom (formula = BMI_class2 ~ watch_tel_vid + play_computergames + race +waist_cir + sex + eat_fastfood,
+                          data = w4inhome_red,
+                                         model = TRUE)
+summary (w4inhome_red_mod)
+#Predictor significance using ORs and CIs
+#underweight
+oddsrat_underweight <- t (x= exp (x = coef(object = w4inhome_red_mod)))[ ,1]
+confint_underweight <- exp (x = confint (object = w4inhome_red_mod))[ , 1:2, 1]
+underweight <- data.frame (OR_underweight = oddsrat_underweight,
+                           CI_underweight = confint_underweight)
+underweight
+
+oddsrat_underweight <- t (x= exp (x = coef(object = w4inhome_red_mod)))[ ,1]
+confint_underweight <- exp (x = confint (object = w4inhome_red_mod))[ , 1:2, 1]
+underweight <- data.frame (OR_underweight = oddsrat_underweight,
+                           CI_underweight = confint_underweight)
+underweight
+#normal weight
+oddsrat_normalweight <- t (x= exp (x = coef(object = w4inhome_red_mod)))[ ,2]
+confint_normalweight <- exp (x = confint (object = w4inhome_red_mod))[ , 1:2, 2]
+normalweight <- data.frame (OR_normalweight = oddsrat_normalweight,
+                           CI_normalweight = confint_normalweight)
+normalweight
+#overweight
+oddsrat_overweight <- t (x= exp (x = coef(object = w4inhome_red_mod)))[ ,3]
+confint_overweight <- exp (x = confint (object = w4inhome_red_mod))[ , 1:2, 3]
+overweight <- data.frame (OR_overweight = oddsrat_overweight,
+                           CI_overweight = confint_overweight)
+overweight
+OR_CI_BMI <- data.frame (underweight, normalweight, overweight)
+OR_CI_BMI
+```
+After controlling for race, waist circumference (cm), and the number of times participants ate fastfood over the last seven days, no BMI categories were statistically significantly associated with hours spent watching television or videos. 
+```{r echo = FALSE}
+#3 Multinomial regression model with covariates and interaction between sex and watch_tel_vid
+w4inhome_red$BMI_class2 <- relevel(w4inhome_red$BMI_class, ref = "Obese: 30+kg/m^2")
+w4inhome_red_mod <- multinom (formula = BMI_class2 ~ watch_tel_vid + race +waist_cir + eat_fastfood + sex +sex*watch_tel_vid,
+                               data = w4inhome_red,
+                                         model = TRUE)
+summary (w4inhome_red_mod)
+#Predictor significance using ORs and CIs
+#underweight
+oddsrat_underweight <- t (x= exp (x = coef(object = w4inhome_red_mod)))[ ,1]
+confint_underweight <- exp (x = confint (object = w4inhome_red_mod))[ , 1:2, 1]
+underweight <- data.frame (OR_underweight = oddsrat_underweight,
+                           CI_underweight = confint_underweight)
+underweight
+
+oddsrat_underweight <- t (x= exp (x = coef(object = w4inhome_red_mod)))[ ,1]
+confint_underweight <- exp (x = confint (object = w4inhome_red_mod))[ , 1:2, 1]
+underweight <- data.frame (OR_underweight = oddsrat_underweight,
+                           CI_underweight = confint_underweight)
+underweight
+#normal weight
+oddsrat_normalweight <- t (x= exp (x = coef(object = w4inhome_red_mod)))[ ,2]
+confint_normalweight <- exp (x = confint (object = w4inhome_red_mod))[ , 1:2, 2]
+normalweight <- data.frame (OR_normalweight = oddsrat_normalweight,
+                           CI_normalweight = confint_normalweight)
+normalweight
+#overweight
+oddsrat_overweight <- t (x= exp (x = coef(object = w4inhome_red_mod)))[ ,3]
+confint_overweight <- exp (x = confint (object = w4inhome_red_mod))[ , 1:2, 3]
+overweight <- data.frame (OR_overweight = oddsrat_overweight,
+                           CI_overweight = confint_overweight)
+overweight
+OR_CI_BMI <- data.frame (underweight, normalweight, overweight)
+OR_CI_BMI
+```
+After adjusting for confounding and adding an interaction term for the association between sex and hours spent watching television or videos, there was no statistically significant association between any BMI category and hours spent watching television or videos. 
+```{r echo = FALSE}
+#4 Multinomial logistic regression for association between BMI_class and play_computergames (without covariates) 
+w4inhome_red$BMI_class2 <- relevel(w4inhome_red$BMI_class, ref = "Obese: 30+kg/m^2")
+w4inhome_red_mod <- multinom (formula = BMI_class2 ~ play_computergames,
+                          data = w4inhome_red,
+                                         model = TRUE)
+summary (w4inhome_red_mod)
+#Predictor significance using ORs and CIs
+#underweight
+oddsrat_underweight <- t (x= exp (x = coef(object = w4inhome_red_mod)))[ ,1]
+confint_underweight <- exp (x = confint (object = w4inhome_red_mod))[ , 1:2, 1]
+underweight <- data.frame (OR_underweight = oddsrat_underweight,
+                           CI_underweight = confint_underweight)
+underweight
+
+oddsrat_underweight <- t (x= exp (x = coef(object = w4inhome_red_mod)))[ ,1]
+confint_underweight <- exp (x = confint (object = w4inhome_red_mod))[ , 1:2, 1]
+underweight <- data.frame (OR_underweight = oddsrat_underweight,
+                           CI_underweight = confint_underweight)
+underweight
+#normal weight
+oddsrat_normalweight <- t (x= exp (x = coef(object = w4inhome_red_mod)))[ ,2]
+confint_normalweight <- exp (x = confint (object = w4inhome_red_mod))[ , 1:2, 2]
+normalweight <- data.frame (OR_normalweight = oddsrat_normalweight,
+                           CI_normalweight = confint_normalweight)
+normalweight
+#overweight
+oddsrat_overweight <- t (x= exp (x = coef(object = w4inhome_red_mod)))[ ,3]
+confint_overweight <- exp (x = confint (object = w4inhome_red_mod))[ , 1:2, 3]
+overweight <- data.frame (OR_overweight = oddsrat_overweight,
+                           CI_overweight = confint_overweight)
+overweight
+OR_CI_BMI <- data.frame (underweight, normalweight, overweight)
+OR_CI_BMI
+```
+After conducting the multinomial logistic regression with just the outcome and predictor, normal weight (OR:0.98, 95%CI:0.98-0.99) and overweight (OR:0.99, 95%CI:0.99-1.00) were the only two categories of BMI that were statistically significantly associated with playing computer/video games.
+
+Therefore, for every 1-hour increase in playing computer/video games per week, participants who were normal weight had 0.02 times lower odds of becoming obese compared to the other categories of BMI. Likewise, for every 1-hour increase in playing computer/video games, those who were overweight had 0.01 times lower odds of becoming obese compared to other BMI categories. 
+```{r echo = FALSE}
+#5 Multinomial regression model with covariates between sex and play_computergames
+w4inhome_red$BMI_class2 <- relevel(w4inhome_red$BMI_class, ref = "Obese: 30+kg/m^2")
+w4inhome_red_mod <- multinom (formula = BMI_class2 ~ play_computergames + race +waist_cir + eat_fastfood + sex,
+                               data = w4inhome_red,
+                                         model = TRUE)
+summary (w4inhome_red_mod)
+#Predictor significance using ORs and CIs
+#underweight
+oddsrat_underweight <- t (x= exp (x = coef(object = w4inhome_red_mod)))[ ,1]
+confint_underweight <- exp (x = confint (object = w4inhome_red_mod))[ , 1:2, 1]
+underweight <- data.frame (OR_underweight = oddsrat_underweight,
+                           CI_underweight = confint_underweight)
+underweight
+
+oddsrat_underweight <- t (x= exp (x = coef(object = w4inhome_red_mod)))[ ,1]
+confint_underweight <- exp (x = confint (object = w4inhome_red_mod))[ , 1:2, 1]
+underweight <- data.frame (OR_underweight = oddsrat_underweight,
+                           CI_underweight = confint_underweight)
+underweight
+#normal weight
+oddsrat_normalweight <- t (x= exp (x = coef(object = w4inhome_red_mod)))[ ,2]
+confint_normalweight <- exp (x = confint (object = w4inhome_red_mod))[ , 1:2, 2]
+normalweight <- data.frame (OR_normalweight = oddsrat_normalweight,
+                           CI_normalweight = confint_normalweight)
+normalweight
+#overweight
+oddsrat_overweight <- t (x= exp (x = coef(object = w4inhome_red_mod)))[ ,3]
+confint_overweight <- exp (x = confint (object = w4inhome_red_mod))[ , 1:2, 3]
+overweight <- data.frame (OR_overweight = oddsrat_overweight,
+                           CI_overweight = confint_overweight)
+overweight
+OR_CI_BMI <- data.frame (underweight, normalweight, overweight)
+OR_CI_BMI
+```
+No significant associations were found after adding covariates to the regression model
+```{r echo = FALSE}
+#6 Multinomial regression model with covariates and interaction between sex and play_computergames for association between BMI_class and play_computergames
+w4inhome_red$BMI_class2 <- relevel(w4inhome_red$BMI_class, ref = "Obese: 30+kg/m^2")
+w4inhome_red_mod <- multinom (formula = BMI_class2 ~ play_computergames + race +waist_cir + eat_fastfood + sex +sex*play_computergames,
+                               data = w4inhome_red,
+                                         model = TRUE)
+summary (w4inhome_red_mod)
+#Predictor significance using ORs and CIs
+#underweight
+oddsrat_underweight <- t (x= exp (x = coef(object = w4inhome_red_mod)))[ ,1]
+confint_underweight <- exp (x = confint (object = w4inhome_red_mod))[ , 1:2, 1]
+underweight <- data.frame (OR_underweight = oddsrat_underweight,
+                           CI_underweight = confint_underweight)
+underweight
+
+oddsrat_underweight <- t (x= exp (x = coef(object = w4inhome_red_mod)))[ ,1]
+confint_underweight <- exp (x = confint (object = w4inhome_red_mod))[ , 1:2, 1]
+underweight <- data.frame (OR_underweight = oddsrat_underweight,
+                           CI_underweight = confint_underweight)
+underweight
+#normal weight
+oddsrat_normalweight <- t (x= exp (x = coef(object = w4inhome_red_mod)))[ ,2]
+confint_normalweight <- exp (x = confint (object = w4inhome_red_mod))[ , 1:2, 2]
+normalweight <- data.frame (OR_normalweight = oddsrat_normalweight,
+                           CI_normalweight = confint_normalweight)
+normalweight
+#overweight
+oddsrat_overweight <- t (x= exp (x = coef(object = w4inhome_red_mod)))[ ,3]
+confint_overweight <- exp (x = confint (object = w4inhome_red_mod))[ , 1:2, 3]
+overweight <- data.frame (OR_overweight = oddsrat_overweight,
+                           CI_overweight = confint_overweight)
+overweight
+OR_CI_BMI <- data.frame (underweight, normalweight, overweight)
+OR_CI_BMI
+```
+No significant associations were found after adding both the covariates and interaction term between sex and hours spent playing computer/ video games to the model.
+#Multinomial logistic regression model assumptions
+1.Independence of observations
+  The original Wave 1 survey took place in 145 middle school, junior high schools, and high schools,   after which a random sample of the students surveyed were selected and interviewd at home. This ensured randomization of participants as well as independence of observations.
+2. Linearity
+```{r echo = FALSE}
+#Box Tidwell Test (Hours spent watching television/videos)
+w4inhome_red_boxtid_watch_tel <- w4inhome_red %>%
+  mutate(Boxtidwell = watch_tel_vid* log(watch_tel_vid))
+BoxTidwell_watch_tel_vid <- multinom (formula = BMI_class2 ~ watch_tel_vid + Boxtidwell,
+                          data = w4inhome_red_boxtid_watch_tel,
+                                         model = TRUE) 
+summary(BoxTidwell_watch_tel_vid)
+#95% Confidence intervals
+ci <- exp(confint(BoxTidwell_watch_tel_vid)) 
+ci
+#Box Tidwell Test (Hours spent playing computer/video games)
+w4inhome_red_boxtid_play_games <- w4inhome_red %>%
+  mutate(Boxtidwell2 = play_computergames* log(play_computergames))
+BoxTidwell_play_computergames <- multinom (formula = BMI_class2 ~  + Boxtidwell2,
+                          data = w4inhome_red_boxtid_play_games,
+                                         model = TRUE) 
+summary(BoxTidwell_play_computergames)
+#95% Confidence intervals
+ci <- exp(confint(BoxTidwell_play_computergames)) 
+ci
+```
+3. No Perfect multicollinearity
+#Refer to DAGs created in DAGitty for each predictor variable for associations between covariates
+Since no arrows in the DAG were drawn between covariates, it is difficult from the current DAGs to discern whether the assumption of no perfect multicollinearity is met for each predictor variable. 
+#Discussion
+In this study, hours spent watching television/videos and hours spent playing computer/video games both significantly predicted the likelihood of becoming obese in participants classified as normal weight or overweight using BMI. Normal weight participants had 2% lower odds of becoming obese compared to all other BMI classifications for every 1-hour increase in watching television/videos, while overweight participants had 1% lower odds. These odds were equivalent for every 1-hour increase in playing computer/ video games. 
+
+Although small, these odds are consistent with the original hypothesis that those with a higher BMI classification would be more likely to become obese due to sedentary behavior compared to those with a lower BMI classification. Other studies have found similar results when examining the association between sedentary behavior and obesity. In a study investigating how to combat obesity in college students, the BMI of women at the age of 21 and the BMI of men at the age of 24 strongly predicted BMI in adulthood. Being mildly to moderately overweight between the ages of 20-22 years old was linked to becoming obese by the ages of 35-37 years old. (2) 
+
+The reason for such low odds ratios and short confidence intervals in this study may be due to the small age range used to analyze the relationship between sedentary behavior and BMI classification. The age range for this study was 24-32 years old. However, in other studies, participants were followed from adolescents almost into mid-adulthood. In a 35-year long Finnish study, the BMI of men increased from 22.5-26.7 kg/m^2, while women's BMI increased from 20.9-25.8 kg/m^2. Those who were less active had higher BMIs than those who were more active at baseline. (3) Another study that examined participants over a longer time frame was a study examining the impact of screen time on BMI using Add Health waves II (mean age: 15.9 years) and III (mean age: 21.4 years). Although investigating similar variables, the associations were much more significant, with females having 42% lower odds of becoming obese with 4 hours of screen time compared to 40 hours of screen time, while males had 22% lower odds. (4)  
+
+In a study assessing other factors in the relationship between sedentary behavior and BMI, males were much more likely to have an unfavorable diet, with 45.7% aged 18 years and older exhibiting poor diet. Females took part in significantly lower levels of physical activity, attaining 32.5% of the ideal amount compared to males who attained 55.4% of the recommended amount. (5)
+
+#Strengths
+One strength of this study is that the data used was from a prospective cohort study, thus limiting the potential for recall errors. Additionally, the sample size is relatively large to allow for adequate variation of the data. 
+#Limitations
+One limitation of this study was that it only included Wave IV of the Add Health prospective cohort study. Therefore, variations by age group could not be identified which may have increased variability of the data and led to more significant study results.
+
+Potential limitations of this study include the potential for self-report and social desirability bias. Since hours spent watching television/videos and hours spent playing computer/videogames were both self-reported via interview, the accuracy of reported time spent doing these activities is subject to the recall of the participants involved. Likewise, people classified as overweight or obese may have under reported their screen time for fear of judgment. 
+#Conclusion
+This study investigated the association between sedentary behaviors like watching television or videos and playing computer/video games on BMI classification. Although the results suggest that those who are classified as either underweight or normal weight using BMI are less likely to become obese compared to those who are overweight or already obese, further research is needed to fully understand the relationship between sedentary behavior and obesity risk. 
+
+Assessing the impact of sedentary behavior on BMI classification may be better understood through observations of sample populations through     critical developmental periods of the lives of participants, such as from adolescence to young adulthood. Adolescents may be more likely to watch television/videos and play computer/video games for longer periods of time due to fewer responsibilities and more time than in young adulthood. Additionally, observations and data collection over a longer time period such as over a period of 10 or more years may allow for observations and data collection after life style changes have taken place or adverse life circumstances that could significantly impact the
+ability of participants to maintain a lifestyle and diet that promotes healthy BMI. 
+
+Future study objectives would be to potentially include waves II and III of Add Health to obtain a larger sample size and compare differences in sedentary behaviors between age groups. Other factors that would be included would be forms of physical activity such as walking, exercise regimens or sessions, and sports to examine the impact of less vs. more physical activity on BMI in addition to watching television/videos and playing computer/video games. 
+
+#References
+
+1. 	About – Add Health. Accessed December 15, 2021. https://addhealth.cpc.unc.edu/about/
+
+2.  Swanson WM. An opportunity to combat obesity lies in the at-risk college population. J Am Assoc      Nurse Pract. 2016;28(4):196-203. doi:10.1002/2327-6924.12360
+
+3.    Piirtola M, Kaprio J, Waller K, et al. Leisure-time physical inactivity and association with         body mass index: A Finnish Twin Study with a 35-year follow-up. Int J Epidemiol.                     2017;46(1):116-127. doi:10.1093/ije/dyw007
+
+4.    Boone JE, Gordon-Larsen P, Adair LS, Popkin BM. Screen time and physical activity during             adolescence: Longitudinal effects on obesity in young adulthood. Int J Behav Nutr Phys Act.          2007;4:1-10. doi:10.1186/1479-5868-4-26
+
+5.    Gande N, Pechlaner R, Bernar B, et al. Cardiovascular health behaviors and associations of sex,       age, and education in adolescents - Results from the EVA Tyrol study. Nutr Metab Cardiovasc          Dis. 2021;31(4):1286-1292. doi:10.1016/j.numecd.2020.11.002 
+
